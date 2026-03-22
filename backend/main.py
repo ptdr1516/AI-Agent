@@ -36,6 +36,10 @@ app.include_router(rag_router, prefix="/api")
 app.include_router(documents_router, prefix="/api")
 app.include_router(metrics_router, prefix="/api")
 
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Nova Agent API is running", "docs": "/docs"}
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
