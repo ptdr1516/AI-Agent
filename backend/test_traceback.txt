@@ -1,0 +1,46 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-8.0.0, pluggy-1.6.0 -- C:\Users\Dell\Desktop\AI Agent\backend\venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Dell\Desktop\AI Agent\backend
+plugins: anyio-4.12.1, asyncio-0.23.5
+asyncio: mode=Mode.STRICT
+collecting ... collected 23 items
+
+tests/test_api.py::test_streaming_endpoint_returns_sse PASSED            [  4%]
+tests/test_calculator.py::test_calculator_valid_math PASSED              [  8%]
+tests/test_calculator.py::test_calculator_division_by_zero PASSED        [ 13%]
+tests/test_calculator.py::test_calculator_invalid_syntax PASSED          [ 17%]
+tests/test_calculator.py::test_calculator_pydantic_schema PASSED         [ 21%]
+tests/test_custom_api.py::test_custom_api_valid_user PASSED              [ 26%]
+tests/test_custom_api.py::test_custom_api_invalid_user_id PASSED         [ 30%]
+tests/test_custom_api.py::test_custom_api_schema PASSED                  [ 34%]
+tests/test_memory.py::test_memory_persistence PASSED                     [ 39%]
+tests/test_memory.py::test_memory_isolation PASSED                       [ 43%]
+tests/test_memory.py::test_clear_memory_removes_messages PASSED          [ 47%]
+tests/test_registry.py::test_registry_returns_all_tools PASSED           [ 52%]
+tests/test_registry.py::test_registry_ordering PASSED                    [ 56%]
+tests/test_registry.py::test_registry_metadata_web_search PASSED         [ 60%]
+tests/test_registry.py::test_registry_metadata_calculator PASSED         [ 65%]
+tests/test_registry.py::test_registry_route_to_search_tag PASSED         [ 69%]
+tests/test_registry.py::test_registry_route_to_math_tag PASSED           [ 73%]
+tests/test_registry.py::test_registry_route_to_unknown_tag PASSED        [ 78%]
+tests/test_registry.py::test_registry_list_metadata PASSED               [ 82%]
+tests/test_sql_db.py::test_sql_valid_query PASSED                        [ 86%]
+tests/test_sql_db.py::test_sql_valid_query_bob PASSED                    [ 91%]
+tests/test_sql_db.py::test_sql_syntax_error PASSED                       [ 95%]
+tests/test_sql_db.py::test_sql_pydantic_schema PASSED                    [100%]
+
+============================== warnings summary ===============================
+tests/test_api.py::test_streaming_endpoint_returns_sse
+  C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\_api\beta_decorator.py:86: LangChainBetaWarning: This API is in beta and may change in the future.
+    warn_beta(
+
+tests/test_api.py: 21 warnings
+  C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\pydantic\main.py:1024: PydanticDeprecatedSince20: The `dict` method is deprecated; use `model_dump` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.6/migration/
+    warnings.warn('The `dict` method is deprecated; use `model_dump` instead.', category=PydanticDeprecatedSince20)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 23 passed, 22 warnings in 10.37s =======================
+
+
+STDERR:

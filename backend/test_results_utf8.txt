@@ -1,0 +1,89 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-8.0.0, pluggy-1.6.0
+rootdir: C:\Users\Dell\Desktop\AI Agent\backend
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.12.1, asyncio-0.23.5
+asyncio: mode=Mode.AUTO
+collected 48 items
+
+tests\test_api.py .                                                      [  2%]
+tests\test_calculator.py ....                                            [ 10%]
+tests\test_chat_sse_helpers.py ....                                      [ 18%]
+tests\test_custom_api.py ...                                             [ 25%]
+tests\test_embeddings_singleton.py .                                     [ 27%]
+tests\test_graph_tool_calling.py ..                                      [ 31%]
+tests\test_memory.py ...                                                 [ 37%]
+tests\test_persistent_vectorstore.py ..                                  [ 41%]
+tests\test_rag.py .......                                                [ 56%]
+tests\test_rag_query.py ..                                               [ 60%]
+tests\test_registry.py .........                                         [ 79%]
+tests\test_retriever.py .FF                                              [ 85%]
+tests\test_sql_db.py ....                                                [ 93%]
+tests\test_upload.py ..                                                  [ 97%]
+tests\test_vector_memory.py .                                            [100%]
+
+================================== FAILURES ===================================
+________________________ test_retriever_top_k_override ________________________
+tests\test_retriever.py:50: in test_retriever_top_k_override
+    asyncio.run(_run())
+..\..\..\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:190: in run
+    return runner.run(main)
+..\..\..\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+..\..\..\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py:654: in run_until_complete
+    return future.result()
+tests\test_retriever.py:45: in _run
+    await r.aretrieve("q", top_k=7)
+rag\retriever.py:89: in aretrieve
+    log_retrieval_diagnostics(query, docs_and_scores, user_id)
+core\retrieval_diagnostics.py:33: in log_retrieval_diagnostics
+    if not settings.ENABLE_EVAL:
+venv\Lib\site-packages\pydantic\main.py:767: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Settings' object has no attribute 'ENABLE_EVAL'
+------------------------------ Captured log call ------------------------------
+DEBUG    asyncio:proactor_events.py:633 Using proactor: IocpProactor
+___________________________ test_retrieve_payloads ____________________________
+tests\test_retriever.py:56: in test_retrieve_payloads
+    p = r.retrieve_payloads("hi")
+rag\retriever.py:152: in retrieve_payloads
+    docs = self.retrieve(query, top_k=top_k, k=k, user_id=user_id)
+rag\retriever.py:129: in retrieve
+    log_retrieval_diagnostics(query, docs_and_scores, user_id)
+core\retrieval_diagnostics.py:33: in log_retrieval_diagnostics
+    if not settings.ENABLE_EVAL:
+venv\Lib\site-packages\pydantic\main.py:767: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'Settings' object has no attribute 'ENABLE_EVAL'
+============================== warnings summary ===============================
+venv\Lib\site-packages\starlette\formparsers.py:12
+  C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+tests/test_api.py::test_streaming_endpoint_returns_sse
+  C:\Users\Dell\Desktop\AI Agent\backend\api\chat.py:143: LangChainDeprecationWarning: `connection_string` was deprecated in LangChain 0.2.2 and will be removed in 1.0. Use connection instead.
+    memory = memory_manager.get_memory(request.session_id)
+
+tests/test_persistent_vectorstore.py::test_chroma_persist_and_search
+  C:\Users\Dell\Desktop\AI Agent\backend\rag\vectorstore.py:129: LangChainDeprecationWarning: The class `Chroma` was deprecated in LangChain 0.2.9 and will be removed in 1.0. An updated version of the class exists in the langchain-chroma package and should be used instead. To use it run `pip install -U langchain-chroma` and import as `from langchain_chroma import Chroma`.
+    return Chroma(
+
+tests/test_persistent_vectorstore.py::test_chroma_persist_and_search
+  C:\Users\Dell\Desktop\AI Agent\backend\rag\vectorstore.py:215: LangChainDeprecationWarning: Since Chroma 0.4.x the manual persistence method is no longer supported as docs are automatically persisted.
+    self._vs.persist()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_retriever.py::test_retriever_top_k_override - AttributeErro...
+FAILED tests/test_retriever.py::test_retrieve_payloads - AttributeError: 'Set...
+================== 2 failed, 46 passed, 7 warnings in 22.35s ==================

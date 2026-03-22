@@ -1,0 +1,29 @@
+# Environments
+venv/
+.env
+
+# Python caching
+__pycache__/
+*.pyc
+
+# DB & Dynamic Storage
+backend/uploads/
+backend/rag_data/
+backend/vector_memory_data/
+backend/chat_memory.db
+
+# Observability Logs
+backend/graph_traces.jsonl
+backend/request_metrics.jsonl
+backend/retrieval_diagnostics.jsonl
+
+# Testing & Cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.eslintcache
