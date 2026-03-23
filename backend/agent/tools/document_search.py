@@ -5,6 +5,7 @@ Returns formatted context (retrieved chunks + source labels), not an LLM answer.
 """
 from langchain.tools import tool
 from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.runnables import RunnableConfig
 
 from core.logger import log
 from rag.rag_chain import build_context
@@ -21,7 +22,6 @@ class DocumentSearchInput(BaseModel):
     )
 
 
-from langchain_core.runnables import RunnableConfig
 
 @tool("document_search", args_schema=DocumentSearchInput)
 async def document_search_tool(query: str, config: RunnableConfig) -> str:

@@ -134,14 +134,7 @@ def wrap_node(fn: Callable, node_name: str) -> Callable:
     if not settings.ENABLE_TRACING:
         return fn
 
-    def _try_await(coro_or_val):
-        import inspect
-        if inspect.iscoroutine(coro_or_val):
-            return coro_or_val
-        async def _wrap(): return coro_or_val
-        return _wrap()
-
-    async def _traced(state: Any, config: RunnableConfig | None = None) -> Any:
+    async def _traced(state, config=None):
         trace_id = get_trace_id()
         configurable = (config or {}).get("configurable") or {}
         user_id = configurable.get("user_id", "")
@@ -153,8 +146,34 @@ def wrap_node(fn: Callable, node_name: str) -> Callable:
         output: Any = {}
 
         try:
-            val = fn(state, config) if config is not None else fn(state)
-            output = await _try_await(val)
+            # Helper to execute the node based on its type (plain fn vs Runnable)
+            async def _execute_node():
+                # Try calling directly first (functions/methods)
+                if callable(fn):
+                    try:
+                        # Try 2-arg signature first, then 1-arg fallback
+                        try:
+                            return fn(state, config) if config is not None else fn(state)
+                        except TypeError:
+                            return fn(state)
+                    except Exception:
+                        raise
+                
+                # If not directly callable, it might be a LangChain Runnable (like ToolNode)
+                if hasattr(fn, "ainvoke"):
+                    return await fn.ainvoke(state, config=config)
+                if hasattr(fn, "invoke"):
+                    return fn.invoke(state, config=config)
+                
+                # Final fallback for generic non-callable objects
+                raise TypeError(f"Node object of type {type(fn)} is not callable and has no ainvoke/invoke methods.")
+
+            val = await _execute_node()
+            import inspect as _ins
+            if _ins.iscoroutine(val):
+                output = await val
+            else:
+                output = val
             return output
         except Exception as exc:
             status = "error"
@@ -182,10 +201,15 @@ def wrap_node(fn: Callable, node_name: str) -> Callable:
 
     # Do not use functools.wraps since it copies __annotations__ but misses __globals__,
     # causing typing.get_type_hints to crash on stringified types like 'UnifiedGraphState'.
-    # Python's inspect.signature naturally looks at __wrapped__.
+    # Do NOT set __wrapped__ — if fn is a class instance (e.g. ToolNode), it causes
+    # inspect.signature(follow_wrapped=True) to crash with a descriptor TypeError.
+    # CRITICAL: explicitly clear __annotations__ — `from __future__ import annotations`
+    # in this module stringifies any annotation (e.g. 'RunnableConfig | None') into
+    # _traced.__annotations__. When LangGraph calls get_type_hints(_traced) it evaluates
+    # those strings in input_node's globals where RunnableConfig is not defined → NameError.
+    _traced.__annotations__ = {}
     _traced.__name__ = getattr(fn, "__name__", node_name)
     _traced.__doc__ = getattr(fn, "__doc__", None)
-    _traced.__wrapped__ = fn
 
     return _traced
 

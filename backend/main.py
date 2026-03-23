@@ -13,6 +13,7 @@ from core.config import settings
 from core.tracing import configure_langsmith
 
 log.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+settings.validate_prod_security()
 configure_langsmith()
 
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION)
@@ -21,7 +22,7 @@ setup_exception_handlers(app)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

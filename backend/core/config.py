@@ -7,9 +7,14 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
+    # Set to True on Render/Prod to enable strict security checks
+    PROD_MODE: bool = False
     # Bearer token for API authentication. Set in .env to enable protection.
     # Leave empty in development to skip auth entirely.
     API_TOKEN: str = ""
+    # List of allowed origins for CORS. Defaults to "*" for dev.
+    # In production, set this to your Render frontend URL.
+    ALLOWED_ORIGINS: list[str] = ["*"]
 
     # ── LLM / OpenRouter ─────────────────────────────────
     OPENROUTER_API_KEY: str  # required — will raise ValueError at startup if missing
@@ -87,6 +92,21 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def is_auth_enabled(self) -> bool:
+        return bool(self.API_TOKEN.strip())
+
+    def validate_prod_security(self):
+        """Raise error if in PROD_MODE but security is disabled."""
+        if self.PROD_MODE and not self.is_auth_enabled:
+            raise ValueError(
+                "CRITICAL SECURITY ERROR: PROD_MODE is enabled but API_TOKEN is empty. "
+                "You MUST set a secure API_TOKEN in your production environment variables."
+            )
+        if self.PROD_MODE and "*" in self.ALLOWED_ORIGINS:
+             import logging
+             logging.warning("SECURITY WARNING: PROD_MODE is on but ALLOWED_ORIGINS contains '*'.")
 
 
 # No try/except: fail fast at startup if OPENROUTER_API_KEY is missing.
