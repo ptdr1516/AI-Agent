@@ -11,41 +11,27 @@ services:
     envVars:
       - key: PROD_MODE
         value: "true"
-      
+
       - key: ALLOWED_ORIGINS
-        value: '["*"]' # Update this to your frontend URL after first deploy
-      
+        value: '["*"]'
+
       - key: OPENROUTER_API_KEY
-        sync: false # Set in Render Dashboard
-      
+        sync: false
+
       - key: TAVILY_API_KEY
         sync: false
-        
+
       - key: API_TOKEN
-        generateValue: true # Generates a random secure token
-        
+        generateValue: true
+
       - key: LANGCHAIN_API_KEY
         sync: false
-        
+
       - key: LANGCHAIN_TRACING_V2
         value: "true"
-        
+
       - key: LANGCHAIN_PROJECT
         value: AI-Agent
-        
+
       - key: PYTHON_VERSION
         value: "3.11.9"
-
-  # ── FRONTEND: React (Vite) ──────────────────────────────────────────
-  - type: web
-    name: ai-agent-frontend
-    runtime: static
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    envVars:
-      - key: VITE_API_URL
-        fromService:
-          name: ai-agent-backend
-          type: web
-          property: host
