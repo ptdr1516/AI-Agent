@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 from models.schemas import RAGChunkItem, RAGQueryRequest, RAGQueryResponse
 from agent.unified_graph import chat_recursion_config, final_assistant_text, get_unified_graph
 from rag.vectorstore import get_app_vector_store
+from core.config import settings
 
 router = APIRouter()
 
@@ -44,11 +45,14 @@ async def rag_query(body: RAGQueryRequest, user_id: str = Depends(verify_token))
         trace_id = new_trace_id()  # one trace_id for all nodes in this RAG invocation
         config = chat_recursion_config()
         config.setdefault("configurable", {})["user_id"] = user_id
+        rag_top_k = body.top_k
+        if settings.LOW_MEMORY_MODE and rag_top_k is not None:
+            rag_top_k = min(rag_top_k, settings.RAG_RETRIEVAL_K)
         result = await graph.ainvoke(
             {
                 "messages": [HumanMessage(content=q)],
                 "memory_context": "",
-                "rag_top_k": body.top_k,
+                "rag_top_k": rag_top_k,
             },
             config=config,
         )

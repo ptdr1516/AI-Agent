@@ -47,7 +47,8 @@ class PersistentVectorStore:
         default_top_k: int | None = None,
     ) -> None:
         self._backend = _normalize_backend(backend or settings.RAG_VECTORSTORE_BACKEND)
-        self._emb = embedding or get_embedding_model()
+        # Keep embeddings/model loading lazy to reduce memory for cold starts.
+        self._emb = embedding
         self._persist_path = Path(
             persist_path
             or (
@@ -61,6 +62,7 @@ class PersistentVectorStore:
             default_top_k if default_top_k is not None else settings.RAG_RETRIEVAL_K
         )
         self._vs: VectorStore | None = None
+        self._disk_has_vectorstore: bool = False
 
     @property
     def backend(self) -> Backend:
@@ -72,15 +74,37 @@ class PersistentVectorStore:
 
     @property
     def has_vectorstore(self) -> bool:
-        """True once a backing index exists (FAISS after first ingest; Chroma after open)."""
-        return self._vs is not None
+        """True if an on-disk index/collection exists (even if not loaded into RAM yet)."""
+        return bool(self._disk_has_vectorstore)
 
     @property
     def vectorstore(self) -> VectorStore:
         if self._vs is None:
-            raise RuntimeError(
-                "Vector store is empty. Load an existing index or add documents first."
-            )
+            if not self._disk_has_vectorstore:
+                raise RuntimeError(
+                    "Vector store is empty. Load an existing index or add documents first."
+                )
+            # Load synchronously for legacy code paths.
+            if self._backend == "faiss":
+                from langchain_community.vectorstores import FAISS
+
+                if self._emb is None:
+                    self._emb = get_embedding_model()
+                self._vs = FAISS.load_local(
+                    str(self._persist_path),
+                    self._emb,
+                    allow_dangerous_deserialization=True,
+                )
+            else:
+                from langchain_community.vectorstores import Chroma
+
+                if self._emb is None:
+                    self._emb = get_embedding_model()
+                self._vs = Chroma(
+                    embedding_function=self._emb,
+                    persist_directory=str(self._persist_path),
+                    collection_name=self._collection_name,
+                )
         return self._vs
 
     @classmethod
@@ -107,22 +131,125 @@ class PersistentVectorStore:
     async def _load_if_exists(self) -> None:
         self._persist_path.mkdir(parents=True, exist_ok=True)
         if self._backend == "faiss":
-            if _faiss_index_exists(self._persist_path):
-                from langchain_community.vectorstores import FAISS
-
-                def _load() -> FAISS:
-                    return FAISS.load_local(
-                        str(self._persist_path),
-                        self._emb,
-                        allow_dangerous_deserialization=True,
-                    )
-
-                self._vs = await asyncio.to_thread(_load)
-                log.info(f"RAG FAISS index loaded from {self._persist_path}")
+            self._disk_has_vectorstore = _faiss_index_exists(self._persist_path)
+            # Do not load into RAM here — keep it lazy until the first query.
+            self._vs = None
+            if self._disk_has_vectorstore:
+                log.info(f"RAG FAISS index found on disk at {self._persist_path}")
             else:
-                self._vs = None
-                log.info(f"No FAISS index at {self._persist_path}; add documents to create one.")
+                log.info(
+                    f"No FAISS index at {self._persist_path}; add documents to create one."
+                )
         else:
+            # For chroma, use a directory-contains-files heuristic (cheap disk check).
+            self._disk_has_vectorstore = any(self._persist_path.glob("*"))
+            self._vs = None
+            if self._disk_has_vectorstore:
+                log.info(
+                    f"RAG Chroma collection {self._collection_name!r} found on disk at {self._persist_path}"
+                )
+            else:
+                log.info(
+                    f"No Chroma collection found at {self._persist_path}; add documents to create one."
+                )
+
+    async def aget_vectorstore(self) -> VectorStore:
+        """Async lazy-load the underlying VectorStore into RAM."""
+        if self._vs is not None:
+            return self._vs
+        if not self._disk_has_vectorstore:
+            raise RuntimeError(
+                "Vector store is empty. Load an existing index or add documents first."
+            )
+
+        if self._backend == "faiss":
+            from langchain_community.vectorstores import FAISS
+
+            if self._emb is None:
+                self._emb = get_embedding_model()
+
+            def _load() -> FAISS:
+                return FAISS.load_local(
+                    str(self._persist_path),
+                    self._emb,
+                    allow_dangerous_deserialization=True,
+                )
+
+            loaded = await asyncio.to_thread(_load)
+
+            # ── Dimension guard ───────────────────────────────────────────────
+            # Detect a stale index built with a different embedding model.
+            # e.g. index built with HuggingFace (384-dim) but current provider
+            # is OpenAI text-embedding-3-small (1536-dim), or vice-versa.
+            stored_dim: int = loaded.index.d
+            try:
+                probe = await asyncio.to_thread(self._emb.embed_query, "ping")
+                model_dim = len(probe)
+            except Exception:
+                model_dim = stored_dim  # can't probe — assume OK
+
+            if model_dim != stored_dim:
+                # Wipe stale files so they get rebuilt on next upload.
+                import shutil
+                log.warning(
+                    f"FAISS dimension mismatch: index has {stored_dim}-dim vectors "
+                    f"but current embedding model produces {model_dim}-dim vectors. "
+                    f"Deleting stale index at {self._persist_path} — please re-upload your documents."
+                )
+                await asyncio.to_thread(shutil.rmtree, str(self._persist_path), True)
+                self._disk_has_vectorstore = False
+                self._vs = None
+                raise ValueError(
+                    f"Embedding dimension mismatch: the stored FAISS index was built with "
+                    f"{stored_dim}-dim vectors, but the current embedding model produces "
+                    f"{model_dim}-dim vectors. The stale index has been deleted. "
+                    f"Please re-upload your documents to rebuild the index."
+                )
+            # ─────────────────────────────────────────────────────────────────
+
+            self._vs = loaded
+            return self._vs
+
+        from langchain_community.vectorstores import Chroma
+
+        if self._emb is None:
+            self._emb = get_embedding_model()
+
+        def _open_chroma() -> Chroma:
+            return Chroma(
+                embedding_function=self._emb,
+                persist_directory=str(self._persist_path),
+                collection_name=self._collection_name,
+            )
+
+        self._vs = await asyncio.to_thread(_open_chroma)
+        return self._vs
+
+    async def aadd_documents(self, documents: list[Document]) -> list[str]:
+        if not documents:
+            return []
+        if self._backend == "faiss":
+            from langchain_community.vectorstores import FAISS
+
+            if self._vs is None:
+                if self._disk_has_vectorstore:
+                    # Add to an existing on-disk index.
+                    self._vs = await self.aget_vectorstore()
+                else:
+                    if self._emb is None:
+                        self._emb = get_embedding_model()
+                    self._vs = await FAISS.afrom_documents(documents, self._emb)
+                log.info(f"RAG FAISS index created with {len(documents)} chunk(s)")
+                self._disk_has_vectorstore = True
+                return [str(i) for i in range(len(documents))]
+            ids = await self._vs.aadd_documents(documents)
+            log.info(f"RAG FAISS: added {len(documents)} chunk(s)")
+            return ids
+
+        # Chroma backend: lazily open the collection on first add.
+        if self._vs is None:
+            if self._emb is None:
+                self._emb = get_embedding_model()
             from langchain_community.vectorstores import Chroma
 
             def _open_chroma() -> Chroma:
@@ -133,25 +260,8 @@ class PersistentVectorStore:
                 )
 
             self._vs = await asyncio.to_thread(_open_chroma)
-            log.info(
-                f"RAG Chroma collection {self._collection_name!r} at {self._persist_path}"
-            )
+            self._disk_has_vectorstore = True
 
-    async def aadd_documents(self, documents: list[Document]) -> list[str]:
-        if not documents:
-            return []
-        if self._backend == "faiss":
-            from langchain_community.vectorstores import FAISS
-
-            if self._vs is None:
-                self._vs = await FAISS.afrom_documents(documents, self._emb)
-                log.info(f"RAG FAISS index created with {len(documents)} chunk(s)")
-                return [str(i) for i in range(len(documents))]
-            ids = await self._vs.aadd_documents(documents)
-            log.info(f"RAG FAISS: added {len(documents)} chunk(s)")
-            return ids
-
-        assert self._vs is not None
         ids = await self._vs.aadd_documents(documents)
         log.info(f"RAG Chroma: added {len(documents)} chunk(s)")
         return ids
@@ -163,12 +273,29 @@ class PersistentVectorStore:
             from langchain_community.vectorstores import FAISS
 
             if self._vs is None:
-                self._vs = FAISS.from_documents(documents, self._emb)
+                if self._disk_has_vectorstore:
+                    self._vs = self.vectorstore
+                else:
+                    if self._emb is None:
+                        self._emb = get_embedding_model()
+                    self._vs = FAISS.from_documents(documents, self._emb)
                 log.info(f"RAG FAISS index created (sync) with {len(documents)} chunk(s)")
+                self._disk_has_vectorstore = True
                 return [str(i) for i in range(len(documents))]
             return self._vs.add_documents(documents)
 
-        assert self._vs is not None
+        if self._vs is None:
+            if self._emb is None:
+                self._emb = get_embedding_model()
+            from langchain_community.vectorstores import Chroma
+
+            self._vs = Chroma(
+                embedding_function=self._emb,
+                persist_directory=str(self._persist_path),
+                collection_name=self._collection_name,
+            )
+            self._disk_has_vectorstore = True
+
         return self._vs.add_documents(documents)
 
     async def asimilarity_search(
@@ -178,7 +305,7 @@ class PersistentVectorStore:
         **kwargs: Any,
     ) -> list[Document]:
         k = k if k is not None else self._default_top_k
-        vs = self.vectorstore
+        vs = await self.aget_vectorstore()
         if self._backend == "faiss":
             fetch_k = kwargs.pop("fetch_k", settings.RAG_FETCH_K)
             return await vs.asimilarity_search(query, k=k, fetch_k=fetch_k, **kwargs)

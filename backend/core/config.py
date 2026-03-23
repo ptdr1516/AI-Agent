@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
@@ -9,6 +10,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     # Set to True on Render/Prod to enable strict security checks
     PROD_MODE: bool = False
+    # When enabled, reduce in-process memory usage at the cost of reduced
+    # context size / some overhead.
+    LOW_MEMORY_MODE: bool = False
     # Bearer token for API authentication. Set in .env to enable protection.
     # Leave empty in development to skip auth entirely.
     API_TOKEN: str = ""
@@ -56,6 +60,8 @@ class Settings(BaseSettings):
     # ── Vector memory (FAISS + sentence-transformers) ────
     VECTOR_MEMORY_DIR: str = "vector_memory_data"
     VECTOR_MEMORY_TOP_K: int = 4
+    # Soft cap for how many summary vectors we keep in RAM/disk in LOW_MEMORY_MODE.
+    VECTOR_MEMORY_MAX_VECTORS_LOW: int = 2000
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
 
     # ── RAG embeddings (singleton via rag.embeddings) ─────
@@ -111,6 +117,34 @@ class Settings(BaseSettings):
         if self.PROD_MODE and "*" in self.ALLOWED_ORIGINS:
              import logging
              logging.warning("SECURITY WARNING: PROD_MODE is on but ALLOWED_ORIGINS contains '*'.")
+
+    @model_validator(mode="after")
+    def _apply_low_memory_overrides(self) -> "Settings":
+        if not self.LOW_MEMORY_MODE:
+            return self
+
+        # Observability overhead.
+        self.ENABLE_TRACING = False
+        self.LOG_LEVEL = "WARNING"
+
+        # Token-heavy memory multipliers.
+        self.LLM_MAX_TOKENS = min(self.LLM_MAX_TOKENS, 1024)
+
+        # Retrieval context size.
+        self.RAG_CHUNK_SIZE = min(self.RAG_CHUNK_SIZE, 300)
+        self.RAG_CHUNK_OVERLAP = min(self.RAG_CHUNK_OVERLAP, 50)
+        self.RAG_RETRIEVAL_K = min(self.RAG_RETRIEVAL_K, 2)
+        self.RAG_FETCH_K = min(self.RAG_FETCH_K, 10)
+
+        # Vector-memory context size.
+        self.VECTOR_MEMORY_TOP_K = min(self.VECTOR_MEMORY_TOP_K, 2)
+
+        # Replace local embedding models with API embeddings where possible.
+        self.EMBEDDING_PROVIDER = "openai"
+        if not self.EMBEDDING_OPENAI_API_BASE:
+            self.EMBEDDING_OPENAI_API_BASE = self.LLM_API_BASE
+
+        return self
 
 
 # No try/except: fail fast at startup if OPENROUTER_API_KEY is missing.

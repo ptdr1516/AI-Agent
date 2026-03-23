@@ -56,8 +56,10 @@ async def retrieve_documents(
         log.debug("runtime_retrieval: no vector index — returning no documents")
         return []
 
+    # Lazy-load the backing vector store into RAM only when we know it exists.
+    vs = await store.aget_vectorstore()
     r = RAGRetriever(
-        store.vectorstore,
+        vs,
         default_top_k=settings.RAG_RETRIEVAL_K,
     )
     docs = await r.aretrieve(q, top_k=top_k, user_id=user_id)

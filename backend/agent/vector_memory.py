@@ -8,10 +8,10 @@ from pathlib import Path
 
 import faiss
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 from core.config import settings
 from core.logger import log
+from rag.embeddings import get_embedding_model
 
 
 def _make_turn_summary(user_message: str, assistant_message: str, max_total: int = 500) -> str:
@@ -28,30 +28,52 @@ class VectorMemoryStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._model: SentenceTransformer | None = None
+        self._model = None
         self._dim: int | None = None
         self._vectors = np.zeros((0, 0), dtype=np.float32)
         self._index: faiss.Index | None = None
         self._texts: list[str] = []
         self._session_ids: list[str] = []
         self._dir = Path(settings.VECTOR_MEMORY_DIR)
+        self._using_api_embeddings = bool(getattr(settings, "LOW_MEMORY_MODE", False))
+        self._api_embeddings = None
         self._load_from_disk()
 
-    @property
-    def model(self) -> SentenceTransformer:
+    def _embed_batch(self, texts: list[str]) -> np.ndarray:
+        """Return normalized embeddings matrix (n, dim) float32."""
+        if self._using_api_embeddings:
+            if self._api_embeddings is None:
+                self._api_embeddings = get_embedding_model()
+            # LangChain Embeddings interface: list[str] -> list[list[float]]
+            vecs = self._api_embeddings.embed_documents(texts)
+            arr = np.asarray(vecs, dtype=np.float32)
+            norms = np.linalg.norm(arr, axis=1, keepdims=True)
+            arr = arr / np.where(norms == 0, 1.0, norms)
+            return arr
+
+        # Local embedding path (higher memory footprint).
         if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
             self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
             self._dim = self._model.get_sentence_embedding_dimension()
-        return self._model
+        # normalize_embeddings=True matches our FAISS cosine-ish similarity setup.
+        arr = self._model.encode(
+            texts, normalize_embeddings=True, show_progress_bar=False
+        ).astype(np.float32)
+        return arr
 
     def _ensure_index(self) -> None:
         if self._index is not None:
             return
-        d = self.model.get_sentence_embedding_dimension()
-        self._dim = d
-        self._index = faiss.IndexFlatIP(d)
+        if self._using_api_embeddings:
+            # For API embeddings we only know the embedding dimension after the first
+            # embed. The index is created during `add_turn`.
+            return
+        assert self._model is not None and self._dim is not None
+        self._index = faiss.IndexFlatIP(self._dim)
         if self._vectors.size == 0:
-            self._vectors = np.zeros((0, d), dtype=np.float32)
+            self._vectors = np.zeros((0, self._dim), dtype=np.float32)
 
     def _persist(self) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
@@ -96,29 +118,49 @@ class VectorMemoryStore:
         if not text.strip():
             return
         with self._lock:
-            self._ensure_index()
+            v = self._embed_batch([text])  # (1, dim)
+            dim = int(v.shape[1]) if v.ndim == 2 else int(len(v))
+            if self._dim is not None and dim != self._dim:
+                log.warning("Vector memory embedding dimension changed; resetting store")
+                self._vectors = np.zeros((0, dim), dtype=np.float32)
+                self._texts, self._session_ids = [], []
+                self._dim = dim
+                self._index = faiss.IndexFlatIP(dim)
+            else:
+                if self._index is None or self._dim is None:
+                    self._dim = dim
+                    self._index = faiss.IndexFlatIP(dim)
+                    self._vectors = np.zeros((0, dim), dtype=np.float32)
             assert self._index is not None and self._dim is not None
-            m = self.model
-            if m.get_sentence_embedding_dimension() != self._dim:
-                log.error("Embedding model dimension mismatch; skip vector add")
-                return
-            v = m.encode([text], normalize_embeddings=True).astype(np.float32)
-            self._vectors = np.vstack([self._vectors, v]) if self._vectors.size else v
+            self._vectors = (
+                np.vstack([self._vectors, v]) if self._vectors.size else v
+            )
             self._texts.append(text)
             self._session_ids.append(session_id)
             self._index.add(v)
+
+            # In LOW_MEMORY_MODE, bound growth so RAM doesn't drift upward.
+            if self._using_api_embeddings:
+                max_keep = int(getattr(settings, "VECTOR_MEMORY_MAX_VECTORS_LOW", 0) or 0)
+                if max_keep > 0 and len(self._texts) > max_keep:
+                    self._texts = self._texts[-max_keep:]
+                    self._session_ids = self._session_ids[-max_keep:]
+                    self._vectors = self._vectors[-max_keep:]
+                    self._index = faiss.IndexFlatIP(self._dim)
+                    if self._vectors.size:
+                        self._index.add(self._vectors)
+
             self._persist()
 
     def search(self, session_id: str, query: str, k: int | None = None) -> list[str]:
         k = k if k is not None else settings.VECTOR_MEMORY_TOP_K
         with self._lock:
-            self._ensure_index()
             if self._index is None or self._index.ntotal == 0 or not query.strip():
                 return []
-            m = self.model
-            if m.get_sentence_embedding_dimension() != self._dim:
+            q = self._embed_batch([query]).astype(np.float32)
+            if self._dim is not None and q.shape[1] != self._dim:
+                # Embedding backend changed; avoid FAISS dimension errors.
                 return []
-            q = m.encode([query], normalize_embeddings=True).astype(np.float32)
             n = self._index.ntotal
             fetch = min(max(k * 4, k), n)
             _, indices = self._index.search(q, fetch)
@@ -142,7 +184,6 @@ class VectorMemoryStore:
         with self._lock:
             if not self._session_ids:
                 return
-            self._ensure_index()
             assert self._index is not None and self._dim is not None
             mask = np.array([sid != session_id for sid in self._session_ids], dtype=bool)
             if mask.all():

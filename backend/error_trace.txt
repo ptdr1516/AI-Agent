@@ -1,0 +1,62 @@
+Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 1024 tokens, but can only afford 912. To increase, visit https://openrouter.ai/settings/credits and upgrade to a paid account', 'code': 402, 'metadata': {'provider_name': None}}, 'user_id': 'user_3BCvmwkNLpruOfoCfXv7MCOUbHK'}
+Traceback (most recent call last):
+  File "C:\Users\Dell\Desktop\AI Agent\backend\test_math_graph.py", line 20, in main
+    async for chunk in graph.astream(state):
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langgraph\pregel\__init__.py", line 1493, in astream
+    async for _ in runner.atick(
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langgraph\pregel\runner.py", line 130, in atick
+    await arun_with_retry(t, retry_policy, stream=self.use_astream)
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langgraph\pregel\retry.py", line 102, in arun_with_retry
+    await task.proc.ainvoke(task.input, config)
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langgraph\utils\runnable.py", line 428, in ainvoke
+    input = await asyncio.create_task(coro, context=context)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langgraph\utils\runnable.py", line 211, in ainvoke
+    ret = await asyncio.create_task(coro, context=context)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\agent\graph\nodes\llm_node.py", line 69, in llm_node
+    return await _chat_llm_generate(state, config, chat_runnable)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\agent\graph\nodes\llm_node.py", line 42, in _chat_llm_generate
+    response = await chat_runnable.ainvoke(state, config)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\runnables\base.py", line 2921, in ainvoke
+    input = await asyncio.create_task(part(), context=context)  # type: ignore
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\runnables\base.py", line 5105, in ainvoke
+    return await self.bound.ainvoke(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 298, in ainvoke
+    llm_result = await self.agenerate_prompt(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 787, in agenerate_prompt
+    return await self.agenerate(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 747, in agenerate
+    raise exceptions[0]
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 923, in _agenerate_with_cache
+    result = await self._agenerate(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_openai\chat_models\base.py", line 797, in _agenerate
+    return await agenerate_from_stream(stream_iter)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 115, in agenerate_from_stream
+    chunks = [chunk async for chunk in stream]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_core\language_models\chat_models.py", line 115, in <listcomp>
+    chunks = [chunk async for chunk in stream]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_openai\chat_models\base.py", line 1980, in _astream
+    async for chunk in super()._astream(*args, **kwargs):
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\langchain_openai\chat_models\base.py", line 764, in _astream
+    response = await self.async_client.create(**payload)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\openai\resources\chat\completions\completions.py", line 2585, in create
+    return await self._post(
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\openai\_base_client.py", line 1794, in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Dell\Desktop\AI Agent\backend\venv\Lib\site-packages\openai\_base_client.py", line 1594, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 1024 tokens, but can only afford 912. To increase, visit https://openrouter.ai/settings/credits and upgrade to a paid account', 'code': 402, 'metadata': {'provider_name': None}}, 'user_id': 'user_3BCvmwkNLpruOfoCfXv7MCOUbHK'}
