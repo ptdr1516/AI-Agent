@@ -14,6 +14,7 @@ from core.metrics_collector import RequestMetrics, bind_metrics
 from rag.rag_chain import parse_build_context
 import json
 import time
+import re
 
 
 def _tool_output_str(output) -> str:
@@ -44,9 +45,18 @@ def _stream_chunk_text(chunk) -> list[str]:
     """Extract incremental text from a chat model stream chunk (str, list, or blocks)."""
     if chunk is None:
         return []
+    if isinstance(chunk, str):
+        return [chunk] if chunk else []
     content = getattr(chunk, "content", None)
+    # Some providers stream "delta" objects; tolerate a couple common shapes.
     if content is None:
-        return []
+        delta = getattr(chunk, "delta", None)
+        if delta is not None:
+            if isinstance(delta, str):
+                return [delta] if delta else []
+            content = getattr(delta, "content", None)
+        if content is None:
+            return []
     if isinstance(content, str):
         return [content] if content else []
     if isinstance(content, list):
@@ -66,9 +76,34 @@ def _stream_chunk_text(chunk) -> list[str]:
 def _event_is_retrieval_node(event: dict) -> bool:
     """Match LangGraph node events for ``retrieval_node`` (name may be namespaced)."""
     name = (event.get("name") or "").strip()
-    if name == "retrieval_node" or name.endswith(":retrieval_node"):
+    if not name:
+        return False
+    if name == "retrieval_node":
         return True
-    return name.split("/")[-1] == "retrieval_node"
+    # Names can be namespaced, depending on LangGraph configuration
+    # (e.g. "graph/retrieval_node", "x:retrieval_node", "a.b.retrieval_node").
+    parts = [p for p in re.split(r"[/:\.]", name) if p]
+    return "retrieval_node" in parts
+
+
+def _normalize_tool_name(raw: str) -> str:
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    # LangGraph event names may be namespaced (e.g. ".../calculator_tool").
+    parts = [p for p in re.split(r"[/:\.]", raw) if p]
+    return parts[-1] if parts else raw
+
+
+def _extract_chat_stream_chunk(event: dict) -> object:
+    data = event.get("data") or {}
+    if "chunk" in data:
+        return data.get("chunk")
+    if "delta" in data:
+        return data.get("delta")
+    if "content" in data:
+        return data.get("content")
+    return None
 
 
 def _retrieval_sse_payload(output) -> dict | None:
@@ -186,7 +221,7 @@ async def chat_stream_endpoint(request: ChatRequest, user_id: str = Depends(veri
                         yield f"data: {json.dumps({'retrieval': {'status': 'complete', 'sources': [], 'rag_detail': {}, 'chunk_count': 0}})}\n\n"
 
                 elif kind == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
+                    chunk = _extract_chat_stream_chunk(event)
                     for text in _stream_chunk_text(chunk):
                         if text:
                             log.info(f"[Trace:{trace_id}] Token chunk: {text!r}")
@@ -205,7 +240,7 @@ async def chat_stream_endpoint(request: ChatRequest, user_id: str = Depends(veri
                             metrics.add_tokens(pt, ct)  # feed metrics
                     
                 elif kind == "on_tool_start":
-                    tool_name = ev_name
+                    tool_name = _normalize_tool_name(ev_name)
                     if not tool_name:
                         continue
                     if tool_name not in tools_used:
@@ -216,7 +251,7 @@ async def chat_stream_endpoint(request: ChatRequest, user_id: str = Depends(veri
                     yield f"data: {json.dumps({'tool': tool_name, 'status': 'start', 'input': str(tool_input)})}\n\n"
 
                 elif kind == "on_tool_end":
-                    tool_name = ev_name
+                    tool_name = _normalize_tool_name(ev_name)
                     if not tool_name:
                         continue
                     log.info(f"[Trace:{trace_id}] Tool end: {tool_name}")

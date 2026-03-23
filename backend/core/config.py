@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     LLM_API_BASE: str = "https://openrouter.ai/api/v1"
     LLM_TEMPERATURE: float = 0.0
     HTTP_REFERER: str = "http://localhost:5173"
+    # Hard cap for OpenRouter "max_tokens".
+    # OpenRouter may reject requests when credits/quota are low and the requested
+    # max_tokens exceeds what the account can afford.
+    LLM_MAX_TOKENS: int = 2048
 
     # ── LangSmith Observability ───────────────────────────
     # Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY to enable.

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import faiss
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
 from core.config import settings
 from core.logger import log
@@ -19,25 +20,6 @@ def _make_turn_summary(user_message: str, assistant_message: str, max_total: int
     return f"User: {u} | Assistant: {a}"
 
 
-def _get_dim() -> int:
-    """Return embedding dimension from the shared singleton."""
-    from rag.embeddings import get_embedding_model
-    sample = get_embedding_model().embed_query("dimension check")
-    return len(sample)
-
-
-def _embed(texts: list[str]) -> np.ndarray:
-    """Embed a list of texts using the shared singleton. Returns float32 L2-normalised array."""
-    from rag.embeddings import get_embedding_model
-    vecs = np.array(
-        get_embedding_model().embed_documents(texts), dtype=np.float32
-    )
-    # L2-normalise for cosine similarity via IndexFlatIP
-    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-    norms = np.where(norms == 0, 1.0, norms)
-    return vecs / norms
-
-
 class VectorMemoryStore:
     """
     Parallel lists (text, session_id) aligned with FAISS row order.
@@ -46,37 +28,45 @@ class VectorMemoryStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._model: SentenceTransformer | None = None
         self._dim: int | None = None
         self._vectors = np.zeros((0, 0), dtype=np.float32)
         self._index: faiss.Index | None = None
         self._texts: list[str] = []
         self._session_ids: list[str] = []
         self._dir = Path(settings.VECTOR_MEMORY_DIR)
-        # NOTE: deliberately NOT loading from disk or embedding model here.
-        # Both are lazy — triggered on first actual use, not on import.
+        self._load_from_disk()
 
-    def _get_dim(self) -> int:
-        if self._dim is None:
-            self._dim = _get_dim()
-        return self._dim
+    @property
+    def model(self) -> SentenceTransformer:
+        if self._model is None:
+            self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
+            self._dim = self._model.get_sentence_embedding_dimension()
+        return self._model
 
     def _ensure_index(self) -> None:
         if self._index is not None:
             return
-        d = self._get_dim()
+        d = self.model.get_sentence_embedding_dimension()
+        self._dim = d
         self._index = faiss.IndexFlatIP(d)
         if self._vectors.size == 0:
             self._vectors = np.zeros((0, d), dtype=np.float32)
 
-    def _load_from_disk_if_needed(self) -> None:
-        """Lazy disk load — called on first search/add, not at import time."""
-        if self._index is not None:
-            return  # already loaded
+    def _persist(self) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        if self._index is None:
+            return
+        faiss.write_index(self._index, str(self._dir / "index.faiss"))
+        meta = {"texts": self._texts, "session_ids": self._session_ids}
+        (self._dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        np.save(self._dir / "vectors.npy", self._vectors)
+
+    def _load_from_disk(self) -> None:
         idx_path = self._dir / "index.faiss"
         meta_path = self._dir / "meta.json"
         vec_path = self._dir / "vectors.npy"
         if not idx_path.is_file() or not meta_path.is_file() or not vec_path.is_file():
-            self._ensure_index()
             return
         try:
             self._index = faiss.read_index(str(idx_path))
@@ -100,28 +90,19 @@ class VectorMemoryStore:
             self._texts, self._session_ids = [], []
             self._index = None
             self._vectors = np.zeros((0, 0), dtype=np.float32)
-            self._ensure_index()
-
-    def _persist(self) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        if self._index is None:
-            return
-        faiss.write_index(self._index, str(self._dir / "index.faiss"))
-        meta = {"texts": self._texts, "session_ids": self._session_ids}
-        (self._dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-        np.save(self._dir / "vectors.npy", self._vectors)
 
     def add_turn(self, session_id: str, user_message: str, assistant_message: str) -> None:
         text = _make_turn_summary(user_message, assistant_message)
         if not text.strip():
             return
         with self._lock:
-            self._load_from_disk_if_needed()
+            self._ensure_index()
             assert self._index is not None and self._dim is not None
-            v = _embed([text])
-            if v.shape[1] != self._dim:
-                log.error("Embedding dimension mismatch; skip vector add")
+            m = self.model
+            if m.get_sentence_embedding_dimension() != self._dim:
+                log.error("Embedding model dimension mismatch; skip vector add")
                 return
+            v = m.encode([text], normalize_embeddings=True).astype(np.float32)
             self._vectors = np.vstack([self._vectors, v]) if self._vectors.size else v
             self._texts.append(text)
             self._session_ids.append(session_id)
@@ -131,12 +112,13 @@ class VectorMemoryStore:
     def search(self, session_id: str, query: str, k: int | None = None) -> list[str]:
         k = k if k is not None else settings.VECTOR_MEMORY_TOP_K
         with self._lock:
-            self._load_from_disk_if_needed()
+            self._ensure_index()
             if self._index is None or self._index.ntotal == 0 or not query.strip():
                 return []
-            q = _embed([query])
-            if q.shape[1] != self._dim:
+            m = self.model
+            if m.get_sentence_embedding_dimension() != self._dim:
                 return []
+            q = m.encode([query], normalize_embeddings=True).astype(np.float32)
             n = self._index.ntotal
             fetch = min(max(k * 4, k), n)
             _, indices = self._index.search(q, fetch)
@@ -158,9 +140,9 @@ class VectorMemoryStore:
 
     def clear_session(self, session_id: str) -> None:
         with self._lock:
-            self._load_from_disk_if_needed()
             if not self._session_ids:
                 return
+            self._ensure_index()
             assert self._index is not None and self._dim is not None
             mask = np.array([sid != session_id for sid in self._session_ids], dtype=bool)
             if mask.all():
@@ -175,5 +157,4 @@ class VectorMemoryStore:
             log.info(f"Vector memory cleared for session: {session_id}")
 
 
-# Singleton — no heavy work happens here, everything is lazy
 vector_memory_store = VectorMemoryStore()

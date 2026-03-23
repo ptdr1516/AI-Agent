@@ -82,6 +82,7 @@ def default_chat_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=settings.LLM_MODEL,
         temperature=settings.LLM_TEMPERATURE,
+        max_tokens=settings.LLM_MAX_TOKENS,
         openai_api_key=settings.OPENROUTER_API_KEY,
         openai_api_base=settings.LLM_API_BASE,
         streaming=True,
