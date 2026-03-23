@@ -34,4 +34,18 @@ services:
         value: AI-Agent
 
       - key: PYTHON_VERSION
-        value: "3.11.9"
+        value: "3.11.0"
+
+  # ── FRONTEND: React (Vite) ──────────────────────────────────────────
+  - type: web
+    name: ai-agent-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          name: ai-agent-backend
+          type: web
+          property: host
