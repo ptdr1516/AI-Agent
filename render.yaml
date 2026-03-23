@@ -37,8 +37,9 @@ services:
         value: "3.11.9"
 
   # ── FRONTEND: React (Vite) ──────────────────────────────────────────
-  - type: static
+  - type: web
     name: ai-agent-frontend
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
