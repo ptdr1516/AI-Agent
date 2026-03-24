@@ -136,7 +136,11 @@ async def list_indexed_documents(
         return []
 
     if store.backend == "faiss":
-        vs = store.vectorstore
+        try:
+            vs = await store.aget_vectorstore()
+        except ValueError:
+            # Dimension mismatch safeguard deleted the index
+            return []
 
         def _run() -> list[dict[str, Any]]:
             return _list_groups_faiss(vs, user_id=user_id)
@@ -145,7 +149,10 @@ async def list_indexed_documents(
 
     from langchain_community.vectorstores import Chroma
 
-    vs = store.vectorstore
+    try:
+        vs = await store.aget_vectorstore()
+    except ValueError:
+        return []
     if not isinstance(vs, Chroma):
         return []
 
@@ -170,7 +177,10 @@ async def remove_document_chunks(
 
     removed = 0
     if store.backend == "faiss":
-        vs = store.vectorstore
+        try:
+            vs = await store.aget_vectorstore()
+        except ValueError:
+            return 0
 
         def _run_f() -> int:
             ids = _faiss_ids_to_delete(
@@ -182,15 +192,19 @@ async def remove_document_chunks(
             return _delete_faiss_chunks(vs, ids)
 
         removed = await asyncio.to_thread(_run_f)
-        if store._vs is not None and len(store.vectorstore.index_to_docstore_id) == 0:
+        if store._vs is not None and len(vs.index_to_docstore_id) == 0:
             for name in ("index.faiss", "index.pkl"):
                 (store.persist_path / name).unlink(missing_ok=True)
             store._vs = None
+            store._disk_has_vectorstore = False
             log.info("Cleared empty FAISS index on disk and in memory")
     else:
         from langchain_community.vectorstores import Chroma
 
-        vs = store.vectorstore
+        try:
+            vs = await store.aget_vectorstore()
+        except ValueError:
+            return 0
         if not isinstance(vs, Chroma):
             return 0
 

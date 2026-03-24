@@ -168,14 +168,23 @@ class PersistentVectorStore:
             if self._emb is None:
                 self._emb = get_embedding_model()
 
-            def _load() -> FAISS:
-                return FAISS.load_local(
-                    str(self._persist_path),
-                    self._emb,
-                    allow_dangerous_deserialization=True,
-                )
+            def _load() -> FAISS | None:
+                try:
+                    return FAISS.load_local(
+                        str(self._persist_path),
+                        self._emb,
+                        allow_dangerous_deserialization=True,
+                    )
+                except RuntimeError as e:
+                    if "No such file" in str(e) or "could not open" in str(e):
+                        return None
+                    raise
 
             loaded = await asyncio.to_thread(_load)
+            if loaded is None:
+                self._disk_has_vectorstore = False
+                self._vs = None
+                raise ValueError("FAISS index file missing (likely deleted by another worker)")
 
             # ── Dimension guard ───────────────────────────────────────────────
             # Detect a stale index built with a different embedding model.
