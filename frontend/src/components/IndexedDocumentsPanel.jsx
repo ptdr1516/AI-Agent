@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { fetchIndexedDocuments, removeIndexedDocument } from '../api';
 
-export default function IndexedDocumentsPanel({ refreshTrigger, disabled }) {
+export default function IndexedDocumentsPanel({ refreshTrigger, disabled, onRemove }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -33,6 +33,7 @@ export default function IndexedDocumentsPanel({ refreshTrigger, disabled }) {
     try {
       await removeIndexedDocument(storedFilename);
       await load();
+      if (onRemove) onRemove();
     } catch (e) {
       setError(e?.message || 'Remove failed');
     } finally {

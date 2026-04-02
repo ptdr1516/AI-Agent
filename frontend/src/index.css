@@ -10,7 +10,7 @@
   }
   
   #root {
-    @apply h-screen w-screen flex overflow-hidden;
+    @apply h-screen w-full flex overflow-hidden;
   }
 
   /* CRITICAL: Enforce explicit dimensions on SVGs so Tailwind preflight doesn't break them */

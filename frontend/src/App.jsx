@@ -49,7 +49,7 @@ const createConversation = () => ({
   // finds the same SQLite history even after a page refresh or server restart
   sessionId: generateId(),
   title: 'New Chat',
-  messages: [WELCOME_MSG],
+  messages: [],
 });
 
 const loadConversations = () => {
@@ -78,7 +78,27 @@ export default function App() {
   const activeToolTimeout = useRef(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [uploadBanner, setUploadBanner] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [indexedDocsRevision, setIndexedDocsRevision] = useState(0);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    const saved = localStorage.getItem('nova_sidebar_open');
+    if (saved !== null) return saved === 'true';
+    return window.innerWidth >= 768; // Default open on desktop
+  });
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editingConversationId, setEditingConversationId] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem('nova_sidebar_open', isSidebarOpen);
+  }, [isSidebarOpen]);
+
+  // Clear editing state when switching conversations to prevent cross-contamination
+  useEffect(() => {
+    setEditingMessage(null);
+    setEditingConversationId(null);
+  }, [activeId]);
+
+  const [isToolPanelOpen, setIsToolPanelOpen] = useState(false);
 
   // Persist every change to localStorage so session IDs are stable across reloads
   useEffect(() => {
@@ -94,11 +114,75 @@ export default function App() {
     }
   }, [activeId, conversations]);
 
+  // Close sidebar on mobile when selecting a chat
+  const handleSelectChat = (id) => {
+    setActiveId(id);
+    setIsSidebarOpen(false);
+  };
+
   const activeConv = conversations.find((c) => c.id === activeId);
 
   const updateConv = useCallback((id, updater) => {
     setConversations((prev) => prev.map((c) => (c.id === id ? updater(c) : c)));
   }, []);
+
+  const deleteMessage = (convId, msgId) => {
+    updateConv(convId, (c) => ({
+      ...c,
+      messages: c.messages.filter((m) => m.id !== msgId),
+    }));
+  };
+
+  const renameConversation = (id, newTitle) => {
+    updateConv(id, (c) => ({ ...c, title: newTitle }));
+  };
+
+  const togglePin = (id) => {
+    updateConv(id, (c) => ({ ...c, isPinned: !c.isPinned }));
+  };
+
+  const toggleArchive = (id) => {
+    updateConv(id, (c) => ({ ...c, isArchived: !c.isArchived }));
+  };
+
+  const toggleMessagePin = (convId, msgId) => {
+    updateConv(convId, (c) => ({
+      ...c,
+      messages: c.messages.map((m) =>
+        m.id === msgId ? { ...m, isPinned: !m.isPinned } : m
+      ),
+    }));
+  };
+
+  const handleRetry = async (convId) => {
+    const conv = conversations.find((c) => c.id === convId);
+    if (!conv || isTyping) return;
+
+    // Find the last user message to retry from
+    const userMsgs = conv.messages.filter((m) => m.role === 'user');
+    if (userMsgs.length === 0) return;
+    
+    const lastUserText = userMsgs[userMsgs.length - 1].content;
+
+    // Remove any trailing agent error/partial messages after that user message
+    const lastUserIdx = conv.messages.findLastIndex((m) => m.role === 'user');
+    updateConv(convId, (c) => ({
+      ...c,
+      messages: c.messages.slice(0, lastUserIdx + 1),
+    }));
+
+    await streamAgentReply(convId, lastUserText);
+  };
+
+  const handleEditMessage = (message) => {
+    setEditingMessage(message);
+    setEditingConversationId(activeId);  // Track which conversation we're editing in
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setEditingConversationId(null);  // Clear conversation tracking
+  };
 
   const handleNewChat = () => {
     const conv = createConversation();
@@ -106,7 +190,7 @@ export default function App() {
     setActiveId(conv.id);
   };
 
-  const handleDeleteChat = (idToDelete) => {
+  const deleteConversation = (idToDelete) => {
     setConversations((prev) => {
       let filtered = prev.filter(c => c.id !== idToDelete);
       
@@ -135,7 +219,13 @@ export default function App() {
           const lastMsg = newMessages[newMessages.length - 1];
 
           if (lastMsg.role === 'user') {
-            newMessages.push({ role: 'agent', content: token, reasoningSteps: [] });
+            newMessages.push({ 
+              id: generateId(),
+              role: 'agent', 
+              content: token, 
+              reasoningSteps: [],
+              timestamp: Date.now()
+            });
           } else {
             const updatedLastMsg = { ...lastMsg, content: lastMsg.content + token };
             newMessages[newMessages.length - 1] = updatedLastMsg;
@@ -152,6 +242,16 @@ export default function App() {
         else if (toolName.includes('custom_api')) frontendToolId = 'api';
         else if (toolName.includes('document_search')) frontendToolId = 'rag';
 
+        // Map to friendly display name for reasoning steps
+        const getToolDisplayName = (name) => {
+          if (name.includes('calculator')) return 'Calculator';
+          if (name.includes('web_search')) return 'Web Search';
+          if (name.includes('sql_db')) return 'SQL Database';
+          if (name.includes('custom_api')) return 'User Lookups';
+          if (name.includes('document_search')) return 'Document Search';
+          return name.split('_').pop() || name; // fallback
+        };
+
         if (status === 'start') {
           if (activeToolTimeout.current) clearTimeout(activeToolTimeout.current);
           setActiveTool(frontendToolId);
@@ -166,7 +266,13 @@ export default function App() {
           const lastMsg = newMessages[newMessages.length - 1];
 
           if (lastMsg.role === 'user') {
-            newMessages.push({ role: 'agent', content: '', reasoningSteps: [] });
+            newMessages.push({ 
+              id: generateId(),
+              role: 'agent', 
+              content: '', 
+              reasoningSteps: [],
+              timestamp: Date.now()
+            });
           }
 
           const updatedLastMsg = { ...newMessages[newMessages.length - 1] };
@@ -174,13 +280,14 @@ export default function App() {
 
           if (status === 'start') {
             updatedLastMsg.reasoningSteps.push({
-              tool: toolName,
+              tool: getToolDisplayName(toolName),
               input: toolInput,
               output: null,
             });
           } else if (status === 'end') {
+            const displayName = getToolDisplayName(toolName);
             for (let i = updatedLastMsg.reasoningSteps.length - 1; i >= 0; i--) {
-              if (updatedLastMsg.reasoningSteps[i].tool === toolName) {
+              if (updatedLastMsg.reasoningSteps[i].tool === displayName) {
                 updatedLastMsg.reasoningSteps[i] = {
                   ...updatedLastMsg.reasoningSteps[i],
                   output: toolOutput,
@@ -198,7 +305,9 @@ export default function App() {
       };
 
       try {
-        await streamChatMessage(USER_SESSION_ID, userText, onToken, onTool);
+        const conv = conversations.find(c => c.id === workingId);
+        const sid = conv?.sessionId || USER_SESSION_ID; // Fallback to global if somehow missing
+        await streamChatMessage(sid, userText, onToken, onTool);
       } catch {
         updateConv(workingId, (c) => {
           const newMessages = [...c.messages];
@@ -220,6 +329,32 @@ export default function App() {
     if (!activeConv || isTyping || uploadingDoc) return;
     const workingId = activeId;
 
+    // If we're editing a message, remove all messages after the edited one and update it
+    if (editingMessage) {
+      updateConv(workingId, (c) => {
+        const msgIndex = c.messages.findIndex(m => m.id === editingMessage.id);
+        if (msgIndex === -1) return c;
+        
+        // Keep messages up to and including the edited message, but update its content
+        const updatedMessages = c.messages.slice(0, msgIndex);
+        updatedMessages.push({
+          ...editingMessage,
+          content: text,
+          timestamp: Date.now()
+        });
+        
+        return {
+          ...c,
+          messages: updatedMessages
+        };
+      });
+      
+      setEditingMessage(null);
+      await streamAgentReply(workingId, text);
+      return;
+    }
+
+    // Normal send flow
     updateConv(workingId, (c) => ({
       ...c,
       title:
@@ -228,7 +363,12 @@ export default function App() {
             ? text.slice(0, 36) + '…'
             : text
           : c.title,
-      messages: [...c.messages, { role: 'user', content: text }],
+      messages: [...c.messages, { 
+        id: generateId(),
+        role: 'user', 
+        content: text,
+        timestamp: Date.now()
+      }],
     }));
 
     await streamAgentReply(workingId, text);
@@ -253,7 +393,13 @@ export default function App() {
 
       updateConv(workingId, (c) => ({
         ...c,
-        messages: [...c.messages, { role: 'user', content: note }],
+        title: c.messages.filter(m => m.role === 'user').length === 0 ? data.filename : c.title,
+        messages: [...c.messages, { 
+          id: generateId(),
+          role: 'user', 
+          content: note,
+          timestamp: Date.now()
+        }],
       }));
 
       await streamAgentReply(workingId, note);
@@ -272,60 +418,113 @@ export default function App() {
     }
   };
 
+  // Apply Search Filtering
+  const filteredMessages = (activeConv?.messages || []).filter(m => 
+    !searchTerm || m.content.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Get the Reasoning Steps from the very last message if it's an agent message
+  const activeReasoning = (activeConv?.messages && activeConv.messages.length > 0)
+    ? activeConv.messages[activeConv.messages.length - 1].reasoningSteps || []
+    : [];
+
   return (
-    <div className="h-screen w-screen flex relative overflow-hidden bg-bgMain text-textMain antialiased">
+    <div className="h-screen w-full flex overflow-hidden bg-bgMain text-textMain antialiased transition-all duration-300">
+      {/* Mobile Overlay */}
+      {(isSidebarOpen || isToolPanelOpen) && (
+        <div 
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden transition-opacity"
+          onClick={() => { setIsSidebarOpen(false); setIsToolPanelOpen(false); }}
+        />
+      )}
+
       <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        onSelect={setActiveId}
-        onNew={handleNewChat}
-        onDelete={handleDeleteChat}
-      />
+      conversations={conversations}
+      activeId={activeId}
+      onSelect={setActiveId}
+      onNew={handleNewChat}
+      onDelete={deleteConversation}
+      onRename={renameConversation}
+      onPin={togglePin}
+      onArchive={toggleArchive}
+      isOpen={isSidebarOpen}
+      onClose={() => setIsSidebarOpen(false)}
+    />
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full relative">
-        <Header title={activeConv?.title || 'New Chat'} isTyping={isTyping} />
+        <Header            activeTitle={activeConv?.title || 'New Chat'}
+            onMenuClick={() => setIsSidebarOpen(true)}
+            onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+            onToolsClick={() => setIsToolPanelOpen(true)}
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            isOpen={isSidebarOpen}
+          />
         
-        {/* Messages container */}
-        <div className="flex-1 overflow-y-auto relative z-10">
-          <ChatWindow messages={activeConv?.messages || []} isTyping={isTyping} />
+        {/* Messages container - strictly constrained scroll area */}
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative z-10 custom-scrollbar">
+          <ChatWindow 
+            messages={filteredMessages} 
+            isTyping={isTyping} 
+            onDelete={(mid) => deleteMessage(activeId, mid)}
+            onRetry={() => handleRetry(activeId)}
+            onPinMessage={(mid) => toggleMessagePin(activeId, mid)}
+            searchTerm={searchTerm}
+            onEditMessage={handleEditMessage}
+          />
         </div>
         
         {/* Input box pinned to bottom */}
-        <div className="flex-shrink-0 z-20 pb-6 pt-2 bg-gradient-to-t from-bgMain via-bgMain to-transparent">
+        <div className="flex-shrink-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-2 w-full bg-gradient-to-t from-bgMain via-bgMain to-transparent">
           {uploadBanner && (
-            <div className="max-w-3xl mx-auto px-4 mb-2">
+            <div className="max-w-3xl mx-auto px-4 mb-2 relative">
               <div
-                className={`text-xs px-3 py-2 rounded-lg border ${
+                className={`text-xs px-3 py-2 pr-8 rounded-lg border relative ${
                   uploadBanner.ok
                     ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-200/95'
                     : 'bg-red-950/40 border-red-800/50 text-red-200/95'
                 }`}
               >
                 {uploadBanner.ok ? uploadBanner.text : `⚠ ${uploadBanner.text}`}
+                <button 
+                  onClick={() => setUploadBanner(null)}
+                  className="absolute right-2 top-1.5 p-1 hover:bg-white/10 rounded transition-colors"
+                  aria-label="Close banner"
+                >
+                  <svg className="w-3.5 h-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
             </div>
           )}
           <IndexedDocumentsPanel
             refreshTrigger={indexedDocsRevision}
             disabled={isTyping || uploadingDoc}
+            onRemove={() => setUploadBanner(null)}
           />
           <MessageInput
             onSend={handleSend}
             disabled={isTyping || uploadingDoc}
             onUpload={handleUpload}
             uploading={uploadingDoc}
+            editMessage={editingConversationId === activeId ? editingMessage : null}  // Only show edit if in correct conversation
+            onCancelEdit={handleCancelEdit}
           />
         </div>
       </div>
 
-      {/* Right Tool Panel - hide on smaller screens */}
-      <div className="hidden lg:flex flex-col w-[280px] bg-bgPanel border-l border-bgBorder flex-shrink-0 h-full">
+      {/* Right Tool Panel */}
+      <div className={`
+        fixed inset-y-0 right-0 z-50 xl:relative xl:z-auto h-full w-4/5 sm:w-72 xl:w-72 flex-shrink-0 flex flex-col bg-bgPanel border-l border-bgBorder transition-transform duration-300
+        ${isToolPanelOpen ? 'translate-x-0 shadow-[-10px_0_20px_rgba(0,0,0,0.5)] xl:shadow-none' : 'translate-x-full xl:translate-x-0'}
+      `}>
         <div className="p-4 border-b border-bgBorder mt-12">
           <h3 className="text-xs font-semibold text-textMuted uppercase tracking-wider mb-1">Active Tools</h3>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          <ToolStatus activeTool={activeTool} />
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 custom-scrollbar">
+          <ToolStatus activeTool={activeTool} reasoningSteps={activeReasoning} />
         </div>
         <div className="p-4 border-t border-bgBorder bg-black/20">
            <div className="flex justify-between items-center text-xs text-textFaint">

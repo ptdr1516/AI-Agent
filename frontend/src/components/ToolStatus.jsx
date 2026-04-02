@@ -53,46 +53,108 @@ const tools = [
   }
 ];
 
-export default function ToolStatus({ activeTool }) {
+export default function ToolStatus({ activeTool, reasoningSteps = [] }) {
+  // Map tool IDs to human-readable names
+  const getToolName = (toolId) => {
+    const toolNames = {
+      'calculator': 'Calculator',
+      'rag': 'Document Search',
+      'search': 'Web Search',
+      'sql': 'SQL Database',
+      'api': 'User Lookups',
+      'custom_api': 'Custom API'
+    };
+    return toolNames[toolId] || toolId.split('_').pop() || toolId;
+  };
   return (
-    <div className="space-y-3">
-      {tools.map((tool) => {
-        const isActive = activeTool === tool.id;
-        
-        return (
-          <div 
-            key={tool.id} 
-            className={`flex items-start gap-3 p-3 rounded-xl border transition-all duration-300 ${
-              isActive 
-                ? 'bg-accentGlow border-accentMain/30 shadow-[0_0_15px_rgba(59,130,246,0.1)]' 
-                : 'bg-bgHover border-bgBorder hover:border-gray-600'
-            }`}
-          >
-            <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-              isActive ? 'bg-accentMain text-white' : 'bg-bgMain text-textMuted'
-            }`}>
-              <div className="w-4 h-4">{tool.icon}</div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-center mb-0.5">
-                <span className={`text-sm font-semibold truncate ${isActive ? 'text-accentMain' : 'text-textMain'}`}>
-                  {tool.name}
-                </span>
-                {isActive ? (
-                  <span className="flex items-center gap-1.5 px-2 py-0.5 bg-accentMain text-white text-[10px] font-bold uppercase rounded-sm shadow-sm animate-pulse-fast tracking-wider">
-                    Running
-                  </span>
-                ) : (
-                  <span className="hidden group-hover:block px-2 py-0.5 bg-bgMain text-textFaint text-[10px] font-medium uppercase rounded shadow-sm border border-bgBorder">
-                    Ready
-                  </span>
-                )}
+    <div className="space-y-6 flex flex-col h-full">
+      {/* Active Tools Section */}
+      <section>
+        <h4 className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-3 ml-1 opacity-70">Infrastructure</h4>
+        <div className="space-y-2">
+          {tools.map((tool) => {
+            const isActive = activeTool === tool.id;
+            return (
+              <div 
+                key={tool.id} 
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all duration-200 ${
+                  isActive 
+                    ? 'bg-accentMain/10 border-accentMain/40 ring-1 ring-accentMain/20' 
+                    : 'bg-bgMain/40 border-bgBorder hover:border-gray-700'
+                }`}
+              >
+                <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-all ${
+                  isActive ? 'bg-accentMain text-white shadow-[0_0_8px_rgba(59,130,246,0.3)]' : 'bg-black/20 text-textFaint'
+                }`}>
+                  <div className="w-3.5 h-3.5">{tool.icon}</div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[13px] font-medium truncate ${isActive ? 'text-textMain' : 'text-textMuted'}`}>
+                      {tool.name}
+                    </span>
+                    {isActive && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-accentMain animate-pulse shadow-[0_0_5px_rgba(59,130,246,0.8)]" />
+                    )}
+                  </div>
+                </div>
               </div>
-              <p className="text-xs text-textMuted line-clamp-2 leading-relaxed">{tool.description}</p>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Execution Log Section */}
+      <section className="flex-1 flex flex-col min-h-0">
+        <h4 className="text-[10px] font-bold text-textMuted uppercase tracking-widest mb-3 ml-1 opacity-70 flex justify-between items-center">
+          Execution Log
+          {reasoningSteps.length > 0 && <span className="text-accentMain lowercase normal-case font-mono">{reasoningSteps.length} items</span>}
+        </h4>
+        
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3 custom-scrollbar">
+          {reasoningSteps.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center p-4 border border-dashed border-bgBorder rounded-xl bg-black/10">
+              <svg className="w-8 h-8 text-textFaint mb-2 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <p className="text-[11px] text-textFaint uppercase tracking-tighter">Waiting for tools...</p>
             </div>
-          </div>
-        );
-      })}
+          ) : (
+            <div className="space-y-4 font-mono">
+              {reasoningSteps.map((step, idx) => (
+                <div key={idx} className="group animate-fade-in relative pl-4 border-l border-bgBorder hover:border-accentMain/40 transition-colors">
+                  <div className="absolute left-[-5px] top-1.5 w-2 h-2 rounded-full bg-bgBorder group-hover:bg-accentMain transition-colors" />
+                  
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-bold text-accentMain uppercase tracking-wider bg-accentMain/10 px-1.5 py-0.5 rounded">
+                      {getToolName(step.tool)}
+                    </span>
+                    {!step.output && (
+                      <span className="text-[9px] text-accentMain animate-pulse font-bold tracking-tighter">RUNNING</span>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 text-[11px] leading-relaxed">
+                    <div className="bg-black/25 rounded-md p-2 border border-bgBorder/50">
+                      <span className="text-textFaint mr-2">QUERY:</span>
+                      <span className="text-textMuted break-all">{step.input}</span>
+                    </div>
+                    
+                    {step.output && (
+                      <div className="bg-emerald-500/5 rounded-md p-2 border border-emerald-500/10">
+                        <span className="text-emerald-500/60 mr-2 uppercase text-[9px] font-bold tracking-widest">DATA:</span>
+                        <span className="text-emerald-200/40 break-all truncate block">
+                          {step.output.length > 100 ? step.output.slice(0, 100) + '...' : step.output}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

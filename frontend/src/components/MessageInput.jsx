@@ -2,10 +2,25 @@ import React, { useState, useRef, useEffect } from 'react';
 
 const UPLOAD_ACCEPT = '.pdf,.txt,.text,.md,.markdown';
 
-export default function MessageInput({ onSend, disabled, onUpload, uploading }) {
+export default function MessageInput({ onSend, disabled, onUpload, uploading, editMessage, onCancelEdit }) {
   const [text, setText] = useState('');
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // When editMessage changes, set the text to edit
+  useEffect(() => {
+    if (editMessage) {
+      setText(editMessage.content);
+      // Focus the textarea
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(textareaRef.current.value.length, textareaRef.current.value.length);
+      }, 0);
+    } else {
+      // Clear text when not editing (conversation switch)
+      setText('');
+    }
+  }, [editMessage]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -22,12 +37,33 @@ export default function MessageInput({ onSend, disabled, onUpload, uploading }) 
         onSend(text.trim());
         setText('');
       }
+    } else if (e.key === 'Escape' && editMessage) {
+      // Cancel edit on Escape
+      onCancelEdit && onCancelEdit();
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto w-full px-4 text-center">
-      <div className="relative flex items-end group bg-bgPanel border border-bgBorder rounded-2xl shadow-sm focus-within:ring-1 focus-within:ring-accentMain/50 focus-within:border-accentMain/50 transition-all duration-200">
+    <div className="max-w-4xl mx-auto px-2 sm:px-4">
+      <div className="relative flex items-end gap-1.5 sm:gap-3 bg-bgHover border border-bgBorder p-1.5 sm:p-2 rounded-2xl shadow-lg focus-within:border-accentMain/50 focus-within:ring-1 focus-within:ring-accentMain/20 transition-all duration-200">
+        
+        {/* Edit mode indicator */}
+        {editMessage && (
+          <div className="absolute -top-10 left-0 right-0 flex items-center justify-between bg-accentMain/10 border border-accentMain/30 rounded-lg px-3 py-2 animate-fade-in">
+            <div className="flex items-center gap-2 text-xs text-accentMain">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              <span className="font-semibold">Editing message</span>
+            </div>
+            <button
+              onClick={onCancelEdit}
+              className="text-xs text-textMuted hover:text-textMain underline"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
         
         <input
           ref={fileInputRef}
@@ -61,16 +97,10 @@ export default function MessageInput({ onSend, disabled, onUpload, uploading }) 
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={
-            uploading
-              ? 'Indexing document…'
-              : disabled
-                ? 'Please wait…'
-                : 'Message Nova…'
-          }
+          placeholder={uploading ? "Uploading..." : "Message Nova..."}
           disabled={disabled || uploading}
-          className="flex-1 max-h-[200px] min-h-[56px] py-4 px-2 bg-transparent text-textMain placeholder-textFaint resize-none outline-none focus:ring-0 leading-relaxed custom-scrollbar disabled:opacity-50"
-          rows={1}
+          className="w-full max-h-[200px] min-h-[56px] bg-transparent text-textMain text-base placeholder-textFaint px-4 py-4 resize-none focus:outline-none custom-scrollbar disabled:opacity-50"
+          style={{ overflowY: 'auto' }}
         />
         
         <button
@@ -81,14 +111,20 @@ export default function MessageInput({ onSend, disabled, onUpload, uploading }) 
             }
           }}
           disabled={!text.trim() || disabled || uploading}
-          className={`p-2 m-2 rounded-xl flex-shrink-0 transition-all duration-200 shadow-sm
+          className={`p-3 m-1 rounded-xl flex-shrink-0 transition-all duration-200 shadow-sm
             ${text.trim() && !disabled 
               ? 'bg-textMain text-bgMain hover:opacity-90 active:scale-95' 
               : 'bg-bgHover text-textFaint'}`}
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19V5m0 0l-7 7m7-7l7 7" />
-          </svg>
+          {editMessage ? (
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19V5m0 0l-7 7m7-7l7 7" />
+            </svg>
+          )}
         </button>
       </div>
 
